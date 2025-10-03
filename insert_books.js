@@ -1,16 +1,13 @@
-// insert_books.js - Script to populate MongoDB with sample book data
 
-// Import MongoDB client
+
+// === MongoDB Connection Setup ===
+require('dotenv').config();
 const { MongoClient } = require('mongodb');
-
-// Connection URI (replace with your MongoDB connection string if using Atlas)
-const uri = 'mongodb://localhost:27017';
-
-// Database and collection names
+const uri = process.env.MONGODB_URI;
 const dbName = 'plp_bookstore';
 const collectionName = 'books';
 
-// Sample book data
+// === Sample Book Data ===
 const books = [
   {
     title: 'To Kill a Mockingbird',
@@ -134,65 +131,123 @@ const books = [
   }
 ];
 
-// Function to insert books into MongoDB
+
+// === Query & Aggregation Functions ===
+async function findBooksByGenre(collection, genre) {
+  return await collection.find({ genre }).toArray();
+}
+async function findBooksAfterYear(collection, year) {
+  return await collection.find({ published_year: { $gt: year } }).toArray();
+}
+async function findBooksByAuthor(collection, author) {
+  return await collection.find({ author }).toArray();
+}
+async function updateBookPrice(collection, title, newPrice) {
+  return await collection.updateOne({ title }, { $set: { price: newPrice } });
+}
+async function deleteBookByTitle(collection, title) {
+  return await collection.deleteOne({ title });
+}
+async function findInStockBooksAfter2010(collection) {
+  return await collection.find({ in_stock: true, published_year: { $gt: 2010 } }).toArray();
+}
+async function findBooksProjection(collection, filter = {}) {
+  return await collection.find(filter, { projection: { _id: 0, title: 1, author: 1, price: 1 } }).toArray();
+}
+async function sortBooksByPriceAsc(collection) {
+  return await collection.find({}).sort({ price: 1 }).toArray();
+}
+async function sortBooksByPriceDesc(collection) {
+  return await collection.find({}).sort({ price: -1 }).toArray();
+}
+async function paginateBooks(collection, page = 1, pageSize = 5) {
+  return await collection.find({}).skip((page - 1) * pageSize).limit(pageSize).toArray();
+}
+async function averagePriceByGenre(collection) {
+  return await collection.aggregate([
+    { $group: { _id: "$genre", avgPrice: { $avg: "$price" } } }
+  ]).toArray();
+}
+async function authorWithMostBooks(collection) {
+  return await collection.aggregate([
+    { $group: { _id: "$author", count: { $sum: 1 } } },
+    { $sort: { count: -1 } },
+    { $limit: 1 }
+  ]).toArray();
+}
+async function booksByDecade(collection) {
+  return await collection.aggregate([
+    { $addFields: { decade: { $concat: [ { $substr: ["$published_year", 0, 3] }, "0s" ] } } },
+    { $group: { _id: "$decade", count: { $sum: 1 } } },
+    { $sort: { _id: 1 } }
+  ]).toArray();
+}
+async function createTitleIndex(collection) {
+  return await collection.createIndex({ title: 1 });
+}
+async function createAuthorYearIndex(collection) {
+  return await collection.createIndex({ author: 1, published_year: 1 });
+}
+async function explainTitleQuery(collection, title) {
+  return await collection.find({ title }).explain();
+}
+
+// === Main Script ===
 async function insertBooks() {
   const client = new MongoClient(uri);
-
   try {
-    // Connect to the MongoDB server
     await client.connect();
-    console.log('Connected to MongoDB server');
-
-    // Get database and collection
+    console.log('✅ Connected to MongoDB server');
     const db = client.db(dbName);
     const collection = db.collection(collectionName);
-
-    // Check if collection already has documents
     const count = await collection.countDocuments();
     if (count > 0) {
-      console.log(`Collection already contains ${count} documents. Dropping collection...`);
+      console.log(`ℹ️  Collection already contains ${count} documents. Dropping collection...`);
       await collection.drop();
-      console.log('Collection dropped successfully');
+      console.log('🗑️  Collection dropped successfully');
     }
-
-    // Insert the books
     const result = await collection.insertMany(books);
-    console.log(`${result.insertedCount} books were successfully inserted into the database`);
-
-    // Display the inserted books
+    console.log(`📚 ${result.insertedCount} books were successfully inserted into the database`);
     console.log('\nInserted books:');
     const insertedBooks = await collection.find({}).toArray();
     insertedBooks.forEach((book, index) => {
       console.log(`${index + 1}. "${book.title}" by ${book.author} (${book.published_year})`);
     });
 
+od    // === Example Query Demonstrations ===
+    // You can comment/uncomment these as needed for your assignment
+    const fictionBooks = await findBooksByGenre(collection, 'Fiction');
+    console.log(`\nFiction books:`, fictionBooks.map(b => b.title));
+
+    const after2000 = await findBooksAfterYear(collection, 2000);
+    console.log(`\nBooks published after 2000:`, after2000.map(b => b.title));
+
+    const avgPrice = await averagePriceByGenre(collection);
+    console.log(`\nAverage price by genre:`, avgPrice);
+
+    const topAuthor = await authorWithMostBooks(collection);
+    console.log(`\nAuthor with most books:`, topAuthor);
+
+    const decadeGroups = await booksByDecade(collection);
+    console.log(`\nBooks grouped by decade:`, decadeGroups);
+
+    // Create indexes and show explain
+    await createTitleIndex(collection);
+    await createAuthorYearIndex(collection);
+    const explain = await explainTitleQuery(collection, '1984');
+    console.log(`\nExplain for title index query:`, explain.queryPlanner ? explain.queryPlanner : explain);
+
+    console.log('\n✅ All operations completed successfully!');
+
   } catch (err) {
-    console.error('Error occurred:', err);
+    console.error('❌ Error occurred:', err.message || err);
   } finally {
-    // Close the connection
     await client.close();
-    console.log('Connection closed');
+    console.log('🔒 Connection closed');
   }
 }
 
-// Run the function
-insertBooks().catch(console.error);
+insertBooks().catch(err => {
+  console.error('❌ Unhandled error:', err.message || err);
+});
 
-/*
- * Example MongoDB queries you can try after running this script:
- *
- * 1. Find all books:
- *    db.books.find()
- *
- * 2. Find books by a specific author:
- *    db.books.find({ author: "George Orwell" })
- *
- * 3. Find books published after 1950:
- *    db.books.find({ published_year: { $gt: 1950 } })
- *
- * 4. Find books in a specific genre:
- *    db.books.find({ genre: "Fiction" })
- *
- * 5. Find in-stock books:
- *    db.books.find({ in_stock: true })
- */ 
